@@ -1,6 +1,6 @@
 {
   "name": "test-fix-loop",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Run a project's test suite, fix failures in batches and rerun only what changed, with hard limits on attempts, full runs and time.",
   "author": { "name": "Rajesh Kasula", "url": "https://github.com/iamrkasula" },
   "homepage": "https://github.com/iamrkasula/test-fix-loop-skill",

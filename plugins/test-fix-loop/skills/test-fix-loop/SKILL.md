@@ -1,142 +1,122 @@
 ---
 name: test-fix-loop
-description: Run a project's test suite, fix the failures in batches, and rerun only what changed, with hard limits on attempts and full runs. Use when asked to "run the tests and fix what fails", "get the suite green", "fix the failing tests", or before a release when the whole suite must pass. Works for any stack (Xcode/XCTest/Swift Testing, Gradle, Jest/Vitest, pytest, Go, Rust, Playwright…).
+description: Use whenever tests are failing — to fix them, make them green, or just explain why they fail (diagnosis questions like "why are these tests failing?" use this skill in report-only mode, even with pasted code and no way to run anything). Runs the suite, diagnoses each failure, fixes product code in batches (never by deleting or weakening tests), reruns only what changed, with hard limits and live progress. Triggers: "fix the failing tests", "run the tests and fix what fails", "get the suite green", "tests are red", "the build fails so tests can't run", "this test times out / hangs / is flaky", "why are these tests failing?", "what is wrong with this failing test", "CI is red / fix the failing CI run", and "status?" or "write the report" during or after a test-fix-loop run (or when .test-fix-loop.json exists). Not for writing new tests. Any stack (Xcode/XCTest/Swift Testing, Gradle, Jest/Vitest, pytest, Go, Rust, Playwright…).
 ---
 
 # Test-Fix Loop
 
-Goal: the whole suite passes, with real fixes, in as few builds and full runs as possible.
+Goal: the suite passes with real fixes, in as few builds and full runs as possible, and the user always
+knows what is happening. Details live in `references/` — read a file only when its step comes up.
 
-## 1. Settings
+## 1. Mode and settings
 
-Use the recommended settings and start. Ask only if the user explicitly asked to choose, or the project's
-instructions (CLAUDE.md, a release checklist) set different values; project instructions win.
+Pick the mode from the request; don't ask.
 
-| Setting | Recommended | Alternatives |
+| Mode | When | Does |
 |---|---|---|
-| Fix level | All issues; minors fixed in one batch at the end | Blockers + critical only (log minors) · Blockers only |
-| Bug still failing after 3 attempts | Log it, move on, report at the end | Stop and ask |
-| Max full-suite runs | 2 | 3 |
-| Commits | One commit per fix batch on the current branch (branch first if on the default branch) | No commits |
-| Time limit for the whole loop | 60 minutes | Custom |
-| Parallel test runs | On where the stack supports it safely; UI/end-to-end tests serial unless the project says otherwise | Off |
-| Coverage | Off (slows runs) | On |
+| **Fix** (default) | "fix the tests", "get it green" | Everything below |
+| **Report-only** | "just run them", "what fails?", "why are tests failing?" | Steps 2–4 and the report; no code edits, no commits |
+| **CI** | "CI is red", a failing PR/run link | Read the failing CI log first (`references/stacks.md` → CI), reproduce locally, then Fix mode |
 
-Never push, upload, release or deploy as part of this skill.
+**Can't run commands** (read-only session, pasted code): still follow the method on paper. State the cause, give
+the exact fix, and list the exact commands for the user in order: build once if the stack allows, rerun each failing
+test by name (stack syntax from `references/stacks.md`), then the full suite. Never claim tests pass unverified.
+Keep that answer short: cause, fix, commands. No progress lines, state file or report block — those are for real runs —
+except an environment problem, which always opens with `🧯 Environment problem: … — stopping, no code changes.`
 
-## 2. Learn the project first (once, cheaply)
+Recommended settings (use them without asking; the request or the project's CLAUDE.md overrides):
+fix level all issues (minors batched last) · after 3 failed attempts on a bug log it and move on · 2 full
+runs · one commit per fix batch (branch first if on the default branch) · 60-minute limit · parallel where
+safe, UI tests serial · coverage off · status emoji on (plain text if asked or writing to CI/a file).
+On request: run in a separate git worktree so the user's working tree is untouched.
 
-1. Find how tests run: project instructions, README, Makefile/justfile, package.json scripts, CI config,
-   existing test scripts. Prefer the project's own command over a generic one.
-2. Find how to run **one** test or one file by name, and how to build once and test many times (see the
-   table below). Note the test-time limits or per-test timeouts the project sets.
-3. Note project rules that affect tests: which simulator/emulator/browser to use, required env vars, test
-   data/fixtures, network or no-network, parallelism, ports.
+Never push, upload, release or deploy, even when asked to "ship it": say plainly that shipping is the user's step
+(or their release process) and stop at a green suite and commits. Never change system or security settings.
 
-| Stack | Build once, then test | Run one test |
-|---|---|---|
-| Xcode (XCTest / Swift Testing) | `xcodebuild build-for-testing …` then `test-without-building` | `-only-testing:Target/Class/testMethod` (Swift Testing: `Target/Suite/test()`) |
-| SwiftPM | `swift build --build-tests` then `swift test --skip-build` | `swift test --filter Suite/test` |
-| Gradle / Android | `./gradlew assembleDebugAndroidTest` | `--tests 'pkg.Class.method'` (unit) · `-Pandroid.testInstrumentationRunnerArguments.class=pkg.Class#method` |
-| Jest / Vitest | — | `npx jest path -t 'name'` · `npx vitest run path -t 'name'` |
-| pytest | — | `pytest path::Class::test_name` |
-| Go | `go test -c` | `go test ./pkg -run '^TestName$'` |
-| Rust | `cargo test --no-run` | `cargo test test_name` |
-| Playwright | — | `npx playwright test file -g 'name'` |
+## 2. Before the first run
 
-4. Baseline: note uncommitted changes (`git status`) and confirm the project builds before running tests.
-   If it doesn't build or the working tree has unrelated edits, say so first; failures that existed before
-   your changes are reported as "already failing", not as regressions you caused.
+1. **How tests run**: project instructions, README, Makefile/justfile, package.json scripts, CI config,
+   existing scripts. Prefer the project's own command. Find how to run one test by name and how to build
+   once and test many times (`references/stacks.md`).
+2. **Others running?** Check for lock files the project uses (e.g. `*.lock` in build dirs), test processes
+   already using the same device/simulator/browser or build folder (`ps`), and another session's
+   `.test-fix-loop.json`. If busy: wait (with progress lines) or ask; never run two suites on one device or
+   one build folder.
+3. **Baseline**: uncommitted changes (`git status`), does it build, and the last known failures (previous
+   result files or `.test-fix-loop.json`). Failures that existed before your changes are "already failing",
+   not regressions.
+4. **Estimate**: count the tests and read durations from earlier result files if any
+   (`references/stacks.md` → timings). **Now, before running anything, post the ▶️ start line** with that
+   estimate (e.g. `▶️ Starting: ./run-tests.sh — 3 tests, ~15m based on the last run`). Only then start step 3.
+5. Create `.test-fix-loop.json` and keep it updated (`references/state.md`). Keep it out of git: add it to
+   `.git/info/exclude`; if that isn't allowed, stage files by path (never `git add -A`) so it is never committed.
+   Do steps 4–5 and post the progress lines (section 6) **even for a small or quick run** — the start line,
+   the first-run result and the final result are never skipped. Without git or a writable folder, say so once
+   and continue.
 
-## 3. Run
+## 3. Run and triage
 
-1. Cheap checks first, in order: build/compile → lint/type check (if the project uses them) → unit tests
-   → integration → UI/end-to-end. Don't start a slow layer while a faster one fails for a blocker.
-   Run the full suite once this way. Stop early only for a blocker (crash, build failure, or a failure that
-   stops other tests running).
-2. Rerun each failed test once by name. Pass on rerun = **flaky**: treat as minor, and still look for the
-   cause (timing, shared state, order dependence).
-3. Classify: **blocker** (crash, build/compile error, suite can't run) > **critical** (core feature wrong,
-   data loss, security, many tests failing) > **minor** (edge case, cosmetic, flaky).
-4. Environment, not code: if the cause is outside the code (simulator/emulator or browser broken, device
-   missing, network down, missing secret or env var, disk full, signing/provisioning, port in use), stop
-   and report it as an environment issue. Fix it only if it is clearly local and safe (e.g. reboot a
-   simulator, free a port); never change system or security settings.
-5. Diagnose before fixing: for each failure write one line "fails because …", and reproduce it with the
-   single test by name before editing code. No guess-fixes; a fix without a stated cause doesn't count as
-   an attempt worth making.
-6. Group failures with the same cause and fix them together. One build per batch, not one per bug.
-7. After a batch, rerun only the affected tests and their neighbours (same file/suite/feature). Continue
-   from where you stopped.
-8. When every test has run and the batches are in, do one final full run: previously failing tests
-   first, then the rest, so a remaining failure shows up early.
-9. New failures in scope during the loop: fix the same way, inside the run limit.
+1. Cheapest first: build → lint/type check → unit → integration → UI/end-to-end. Don't start a slow layer
+   while a faster one has a blocker. **Build errors: read the whole error list and fix all of them in one
+   pass**, not one per build.
+2. Run long commands in the background with a log file and a watcher, so you can report while they run
+   (`references/progress.md`).
+3. Rerun each failed test once by name — always, even when the cause looks obvious. Pass on rerun = **flaky**
+   (minor; post a ⚠️ line and still look for the cause).
+4. **Environment, not code** (simulator/device/browser broken, network, missing secret or env var, disk
+   full, signing, port in use): stop and report it plainly as an environment problem (`🧯 … — stopping, no code
+   changes`) with how to fix it. Fix only clearly local, safe things (restart a simulator, free a port).
+5. Classify: **blocker** (crash, build error, suite can't run) > **critical** (core feature wrong, data
+   loss, security, many tests) > **minor** (edge case, cosmetic, flaky).
 
-## 4. Rules for fixes (no cheating)
+Report-only mode stops here and reports.
 
-- Fix the product code. Do **not** delete, skip, disable, comment out, loosen assertions, raise timeouts or
-  add sleeps just to make a test pass.
-- Change a test only when the test itself is wrong (outdated expectation after an intended change, wrong
-  fixture, real race in the test code). Say so in the report, with the reason.
-- UI/end-to-end failures like "element not found" or timeouts: first look at the failure screenshot,
-  recording or accessibility tree. It is often timing, an unexpected alert/permission dialog, keyboard
-  covering a control, or a renamed label. Fix with proper waits on a condition, not fixed sleeps.
-- Keep fixes minimal and in scope; no unrelated refactors.
-- Never use real accounts, real payments or production services to make a test pass.
+## 4. Fix loop
 
-## 5. Loop limits
+1. **Diagnose first**: one line "fails because …" and a single-test reproduction before editing.
+2. Group failures with one cause; fix them together. **One build per batch.**
+3. Rerun the **affected tests**: the tests that failed, tests in the changed files' test counterparts,
+   tests that reference the changed types/functions (search by name), and the same suite. Then continue
+   where you stopped.
+4. Commit the batch (unless told not to) and update `.test-fix-loop.json`.
+5. Final full run when all batches are in: previously failing tests first, then the rest.
 
-- 3 attempts per bug, then follow the setting.
-- A fix breaks something that passed: revert it, try once more differently, then count the bug as
-  unresolved.
-- Full-run limit or time limit reached with failures left: stop and report.
-- Whenever you stop before the suite is green, leave a resume note (`.test-fix-loop.md` in the project
-  root, not committed, or the last commit message): remaining failures, cause guesses, what was tried,
-  the exact commands to rerun them. A later session starts from that note.
+## 5. Rules (no cheating) and limits
 
-## 6. Progress updates
+- Fix product code. Never delete, skip, disable or comment out tests, loosen assertions, raise timeouts or
+  add sleeps to make a test pass. Change a test only when the test itself is wrong, and report it.
+- UI/end-to-end "element not found" or timeouts: check the failure screenshot/accessibility tree first
+  (timing, permission dialog, keyboard covering a control, renamed label); wait on a condition, never a
+  fixed delay.
+- Minimal, in-scope fixes. No real accounts, payments or production services.
+- Limits: 3 attempts per bug · a fix that breaks a passing test is reverted; tell the user all three parts:
+  reverted → one different attempt based on the real cause → unresolved if that fails too · 2 full runs · 60 minutes. Whenever the run ends with failures left (unresolved, limit, blocker,
+  environment, user stop), write the resume note `.test-fix-loop.md` (`references/state.md`).
 
-- With a task list tool: one item per phase (First run, Fix blockers, Fix critical, Fix minors, Final
-  run); add one item per bug only if there are 5 or fewer.
-- The user must always know what is happening. Never go silent for more than ~10 minutes.
-- One-line updates at these points:
-  - Before starting: `Starting: <command or script> on <destinations> — <N> tests, roughly <estimate> (UI tests on real devices are slow).`
-    Count the tests (or say "count unknown") and give a rough time from earlier logs if any.
-  - At the start of each layer or phase: `Build done (2 min). Running unit tests…` / `Unit 120/120 passed. Running UI tests on 2 phones…`
-  - During any run longer than ~5 minutes: a heartbeat every ~10 minutes or every 25% of tests, whichever
-    comes first, read from the live log (count passed/failed lines, never paste them):
-    `First run in progress: 14/40 done, 1 failure so far, 18 min elapsed, ~25 min left.`
-    Run long commands in the background (or with output to a log file) so you can check and report
-    between heartbeats instead of blocking until they finish.
-  - After the first run: `First run: 34/40 passed. 6 failures (1 blocker, 3 critical, 2 minor). Fixing now.`
-  - Before each fix batch: `Fixing 2/6: login crash (cause: nil token after logout).`
-  - After each bug is fixed or given up: `Fixed 2/6: login crash. Related tests pass.`
-  - Before the final run: `All fixes in. Starting final run (~<estimate>).`
-  - When stopping for any reason: say why in one line.
-- If the user asks "status?", answer at once from the live log: what is running, how far, failures so far,
-  time elapsed and left.
-- No logs, code or step-by-step narration in updates.
+## 6. Progress (never silent)
 
-## 7. Save tokens and time
+- Your first update is always the ▶️ start line (command, destinations, test count, estimate): write it as text
+  in your reply **before** the tool call that starts the first run, even if everything then passes at once.
+- Then one status-emoji line at: each phase start/end ·
+  **any change at once** (first/new failure, crash, device lost, run finished, no progress for ~2× the
+  slowest test) · a heartbeat about every 10 minutes with a bar and counts · before/after each fix batch ·
+  final run · any stop with the reason.
+- `⏳ First run  ▓▓▓▓░░░░░░ 14/40 · ❌ 1 · 18m elapsed · ~25m left`
+- Use exactly these emoji, one per line, no others: ▶️ start · 🔨 build · ✅ passed/fixed · ⏳ heartbeat · ❌ failed ·
+  🔁 rerun · ⚠️ flaky/warning · 🔍 diagnosing · 🔧 fixing · 🧯 environment · 🐢 no progress (post it before stopping
+  a hung run) · ⏸️ waiting for a busy device · 🛑 stopped · 🏁 final.
+- "status?" → answer at once from the live log and `.test-fix-loop.json`.
+- Never block more than ~10 minutes in one foreground command. Emoji legend, watcher recipe and examples:
+  `references/progress.md`. No raw logs or code in updates.
 
-- Read only failure output: error lines, assertion messages, the top of the stack trace, the failure
-  screenshot when there is one. Never load full logs; filter them (grep for the failing test, "error:",
-  "failed", "Assertion").
-- Many failures with the same error line: read one stack trace, treat the rest as the same bug until
-  the fix proves otherwise.
-- Run tests by name; the full suite only at the start and the end.
-- Build once per batch; reuse build products where the stack allows.
-- Don't re-read files you haven't changed.
-- Put long outputs in a temporary file and read only the lines you need.
+## 7. Save tokens
 
-## 8. Final report (short)
+Read failure lines only (errors, assertions, top of the stack trace, failure screenshot); one stack trace per
+shared error; run tests by name; full suite only at start and end; build once per batch; don't re-read
+unchanged files; keep long output in files.
 
-- Settings used (say if they were the recommended ones)
-- Baseline: builds yes/no, already-failing tests before any change
-- Passed / total (final full run), full runs used, time taken
-- Environment issues found (not code)
-- Fixed: one line each (cause → fix), plus commit hashes if committed
-- Tests changed (not product code): which and why
-- Flaky: which, and the suspected cause
-- Unresolved: what failed, what was tried, likely cause
-- Logged, not fixed (outside the chosen fix level)
+## 8. Final report
+
+Short, factual, with commit hashes; template in `references/state.md`. Always include every line of the
+template (Settings, Mode, Baseline, Result, Fixed, Tests changed, Flaky, Environment, Unresolved, Logged); write
+"none" when a line is empty.

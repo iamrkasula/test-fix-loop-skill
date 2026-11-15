@@ -1,0 +1,48 @@
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate marketplace and plugin manifests
+        run: |
+          claude plugin validate .
+          claude plugin validate plugins/test-fix-loop
+
+      - name: Check skill frontmatter and references
+        run: |
+          f=plugins/test-fix-loop/skills/test-fix-loop/SKILL.md
+          head -1 "$f" | grep -qx -- '---'
+          grep -q '^name: test-fix-loop$' "$f"
+          grep -q '^description: ' "$f"
+          for r in $(grep -o 'references/[a-z-]*\.md' "$f" | sort -u); do
+            test -f "plugins/test-fix-loop/skills/test-fix-loop/$r" || { echo "missing $r"; exit 1; }
+          done
+
+      - name: Versions match
+        run: |
+          a=$(jq -r '.plugins[] | select(.name=="test-fix-loop") | .version' .claude-plugin/marketplace.json)
+          b=$(jq -r .version plugins/test-fix-loop/.claude-plugin/plugin.json)
+          echo "marketplace=$a plugin=$b"; test "$a" = "$b"
+
+      - name: No scripts or hooks shipped in the skill
+        run: |
+          ! find plugins/test-fix-loop/skills -type f ! -name '*.md' | grep .
+          ! test -e plugins/test-fix-loop/hooks

@@ -7,9 +7,14 @@
 A [Claude Code](https://claude.com/claude-code) skill that runs your tests, diagnoses and fixes failures in
 batches, reruns only what changed, and stops at hard limits instead of looping forever.
 
+It is a **process skill**: a disciplined method that works the same for any language, framework or platform.
+Stack details are a small lookup table; project specifics come from your own scripts and `CLAUDE.md`. No
+dependencies, no scripts, no network calls.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-d97757)](https://docs.claude.com/en/docs/claude-code/plugins)
-[![Version](https://img.shields.io/badge/version-1.0.0-informational)](plugins/test-fix-loop/.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/badge/version-1.1.0-informational)](plugins/test-fix-loop/.claude-plugin/plugin.json)
+[![validate](https://github.com/iamrkasula/test-fix-loop-skill/actions/workflows/validate.yml/badge.svg)](https://github.com/iamrkasula/test-fix-loop-skill/actions/workflows/validate.yml)
 [![Stacks](https://img.shields.io/badge/stacks-Xcode_%C2%B7_Android_%C2%B7_JS_%C2%B7_Python_%C2%B7_Go_%C2%B7_Rust-555)](#supported-stacks)
 
 [Why](#why) · [Install](#install) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Guardrails](#guardrails) · [Configuration](#configuration) · [FAQ](#faq)
@@ -68,20 +73,35 @@ Ask in plain words. The skill activates on requests such as:
 > fix the failing tests, blockers only, don't commit
 ```
 
+Three modes, picked from what you ask:
+
+| Mode | Ask | What happens |
+|---|---|---|
+| **Fix** (default) | "fix the failing tests", "get it green" | Full loop: run, triage, fix in batches, final run |
+| **Report-only** | "why are the tests failing?", "just run them" | Runs and diagnoses, no code changes |
+| **CI** | "CI is red", a PR or run link | Reads the failed CI log first, reproduces locally, then fixes |
+
 Example progress (illustrative):
 
 ```text
-Starting: scripts/test.sh on iPhone 16 simulator — 220 tests, ~25 min (UI tests are slow).
-Build done (3 min). Unit 180/180 passed. Running UI tests…
-First run in progress: 30/40 UI done, 2 failures so far, 14 min elapsed, ~6 min left.
-First run: 212/220 passed. 8 failures (1 blocker, 4 critical, 3 minor). Fixing now.
-Fixing 1/8: app crashes on empty cart (cause: nil total when cart is empty).
-Fixed 1/8: empty-cart crash. Related tests pass.
-Fixed 5/8: date formatting in 4 report tests (one shared cause). Related tests pass.
-Gave up 6/8: CheckoutUITests.testApplePay — needs a physical device; logged.
-All fixes in. Starting final run (~25 min).
-Final run: 219/220 passed.
+▶️ Starting: scripts/test.sh on iPhone 16 simulator — 220 tests, ~25m (UI tests are slow)
+🔨 Building…
+✅ Build done (3m). Unit 180/180 passed. Running UI tests…
+⏳ First run  ▓▓▓▓▓▓▓░░░ 30/40 UI · ❌ 2 · 14m elapsed · ~6m left
+❌ First run: 212/220 passed — 1 blocker, 4 critical, 3 minor
+🔁 Rerunning 8 failures once to spot flaky tests…
+⚠️ SyncTests.testRetry passed on rerun — flaky (shared mock)
+🔍 Diagnosing 1/7: app crashes on empty cart
+🔧 Fixing 1/7: nil total when cart is empty
+✅ Fixed 1/7: empty-cart crash. Related tests pass.
+🛑 Gave up 6/7: CheckoutUITests.testApplePay — needs a physical device; logged
+🏁 Final run started (~25m)
+🏁 Final run: 219/220 passed · 2 runs · 38m
 ```
+
+Every line starts with one status emoji with a fixed meaning (▶️ start · 🔨 build · ✅ passed/fixed · ⏳ heartbeat ·
+❌ failed · 🔁 rerun · ⚠️ flaky/warning · 🔍 diagnosing · 🔧 fixing · 🧯 environment · 🐢 possible hang · 🛑 stopped ·
+🏁 final). Ask for "no emoji" (or write to a CI log) and the same lines come as plain text with a `[####------]` bar.
 
 Example final report (illustrative):
 
@@ -179,8 +199,10 @@ only", "3 full runs", "don't commit") or set them in your project's `CLAUDE.md`,
 
 - **Start:** what is running, where, how many tests, and a rough duration.
 - **Phases:** one line as each layer or phase starts and ends.
+- **On change:** an immediate line when a phase starts or ends, a test fails, a device is lost, the run
+  finishes, or nothing has moved for unusually long (possible hang).
 - **Heartbeat:** during any run longer than about 5 minutes, one line about every 10 minutes or every 25% of
-  tests, read from the live log.
+  tests, read from the live log by a background watcher, so updates arrive even while tests are running.
 - **Fixes:** one line before and after each batch.
 - **On demand:** "status?" gets an immediate answer.
 - **Final report:** settings, baseline, pass count, runs and time used, fixes with commits, tests changed,
@@ -235,10 +257,27 @@ commands on your machine.
 ## Repository layout
 
 ```text
-.claude-plugin/marketplace.json                      Plugin marketplace manifest
-plugins/test-fix-loop/.claude-plugin/plugin.json     Plugin manifest
-plugins/test-fix-loop/skills/test-fix-loop/SKILL.md  The skill
+.claude-plugin/marketplace.json                          Plugin marketplace manifest
+plugins/test-fix-loop/.claude-plugin/plugin.json         Plugin manifest
+plugins/test-fix-loop/skills/test-fix-loop/SKILL.md      The skill (short core)
+plugins/test-fix-loop/skills/test-fix-loop/references/   Stacks & CI, progress & watcher, state & report (loaded on demand)
+.github/workflows/validate.yml                           Manifest and structure checks on every push
+CHANGELOG.md                                             Release notes
 ```
+
+## How it's tested
+
+Before each release the skill runs against a private test suite at three levels, with no language toolchains,
+devices or CI servers:
+
+| Level | Covers |
+|---|---|
+| **On paper** (35 cases) | When it triggers and when it doesn't, single-test commands for 8 stacks (pytest, Jest, XCTest, Go, Rust, Gradle, Playwright, SwiftPM), every rule, progress format, final report |
+| **Real runs** (11 cases) | The loop running against a generic fake test runner: fixes, report-only, flaky tests, hangs, a device lost mid-run, lint first, a busy device, CI logs, an unfixable case with a resume note, heartbeats, estimates |
+| **Live git** (4 scenarios) | New branch and commits, "don't commit", already-failing baseline, separate worktree; the state file is never committed |
+
+Graders check meaning, not exact wording. The test suite is kept out of the plugin so nothing extra is
+installed on your machine.
 
 ## Contributing
 

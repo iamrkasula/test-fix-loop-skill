@@ -10,7 +10,7 @@
     {
       "name": "test-fix-loop",
       "description": "Run a project's test suite, fix failures in batches and rerun only what changed, with hard limits on attempts, full runs and time. Any stack: Xcode, SwiftPM, Gradle, Jest/Vitest, pytest, Go, Rust, Playwright.",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "author": { "name": "Rajesh Kasula", "url": "https://github.com/iamrkasula" },
       "source": "./plugins/test-fix-loop",
       "category": "development",
