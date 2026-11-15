@@ -11,6 +11,21 @@ It is a **process skill**: a disciplined method that works the same for any lang
 Stack details are a small lookup table; project specifics come from your own scripts and `CLAUDE.md`. No
 dependencies, no scripts, no network calls.
 
+**What sets it apart.** Plenty of skills loop "run tests → fix → rerun". This one adds what they leave out:
+
+1. **No cheating, ever.** Never deletes, skips or weakens a test, adds sleeps or raises timeouts to get green.
+2. **Report-only mode.** "Why are these tests failing?" gets a diagnosis with no edits.
+3. **Environment vs. code.** A missing simulator, secret or device stops the run with a 🧯 line instead of a code hack.
+4. **Batch fixes, targeted reruns.** One build per batch of related fixes; only affected tests rerun.
+5. **Never silent.** A start line with an estimate, updates on every change, heartbeats, "status?" at any time, and a
+   resume note if it stops early.
+6. **Any stack, no dependencies.** Xcode, Android, JS, Python, Go, Rust, Playwright and more; real devices and CI too.
+7. **Tested itself.** 50 scenarios across three levels (on paper, real runs against a fake runner, live git) pass
+   at 100% before each release.
+
+**Best for** slow or flaky suites (iOS/Android UI tests, end-to-end, big monorepos), red CI, and agents working
+unattended. For a tiny project with fast tests, plain Claude Code is often enough.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-d97757)](https://docs.claude.com/en/docs/claude-code/plugins)
 [![Version](https://img.shields.io/badge/version-1.1.0-informational)](plugins/test-fix-loop/.claude-plugin/plugin.json)
@@ -55,13 +70,15 @@ each of them with a disciplined routine.
 ### As a standalone skill
 
 ```bash
-mkdir -p ~/.claude/skills/test-fix-loop
-curl -fsSL https://raw.githubusercontent.com/iamrkasula/test-fix-loop-skill/main/plugins/test-fix-loop/skills/test-fix-loop/SKILL.md \
-  -o ~/.claude/skills/test-fix-loop/SKILL.md
+B=https://raw.githubusercontent.com/iamrkasula/test-fix-loop-skill/main/plugins/test-fix-loop/skills/test-fix-loop
+D=~/.claude/skills/test-fix-loop
+mkdir -p "$D/references"
+curl -fsSL "$B/SKILL.md" -o "$D/SKILL.md"
+for f in progress stacks state; do curl -fsSL "$B/references/$f.md" -o "$D/references/$f.md"; done
 ```
 
-To scope it to a single project, place the file at `.claude/skills/test-fix-loop/SKILL.md` in that repository
-instead. Restart Claude Code and confirm it appears under `/skills`.
+To scope it to a single project, use `D=.claude/skills/test-fix-loop` inside that repository instead. Restart
+Claude Code and confirm it appears under `/skills`.
 
 ## Quick start
 
